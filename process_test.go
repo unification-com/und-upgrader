@@ -31,8 +31,7 @@ func TestLaunchProcess(t *testing.T) {
 	assert.Equal(t, "", stderr.String())
 	assert.Equal(t, "Genesis foo bar 1234\nI[2020-10-29|11:58:40.526] Committed state module=state height=24 txs=9 appHash=4694FE87727435B239A33866D3EFCA759A5DE905EB1EDF1D257630D6C1868459\nATTEMPT UPGRADE to chain2 at height 24\nSUCCESSFUL UPGRADE to chain2 at height 24\n", stdout.String())
 
-	// ensure this is upgraded now and produces new output
-
+	// ensure this is upgraded now and produces new output for chain2. Run upgrade for chain3
 	currentBin, err = cfg.CurrentBin()
 	require.NoError(t, err)
 	require.Equal(t, cfg.UpgradeBin("chain2"), currentBin)
@@ -41,12 +40,25 @@ func TestLaunchProcess(t *testing.T) {
 	stderr.Reset()
 	doUpgrade, err = LaunchProcess(cfg, args, &stdout, &stderr)
 	require.NoError(t, err)
+	assert.True(t, doUpgrade)
+	assert.Equal(t, "", stderr.String())
+	assert.Equal(t, "Chain 2 is live!\nArgs: second run --verbose\nI[2020-10-29|12:58:40.526] Committed state module=state height=60 txs=9 appHash=6994FE87727435B239A33866D3EFCA759A5DE905EB1EDF1D257630D6C1868459\nATTEMPT UPGRADE to chain3 at height 60\nSUCCESSFUL UPGRADE to chain3 at height 60\n", stdout.String())
+
+	// ensure this is upgraded now and produces new output for chain3
+	currentBin, err = cfg.CurrentBin()
+	require.NoError(t, err)
+	require.Equal(t, cfg.UpgradeBin("chain3"), currentBin)
+	args = []string{"third", "run", "--chain3"}
+	stdout.Reset()
+	stderr.Reset()
+	doUpgrade, err = LaunchProcess(cfg, args, &stdout, &stderr)
+	require.NoError(t, err)
 	assert.False(t, doUpgrade)
 	assert.Equal(t, "", stderr.String())
-	assert.Equal(t, "Chain 2 is live!\nArgs: second run --verbose\nFinished successfully\n", stdout.String())
+	assert.Equal(t, "Chain 3 finally!\nArgs: third run --chain3\nFinished successfully\n", stdout.String())
 
 	// ended without other upgrade
-	require.Equal(t, cfg.UpgradeBin("chain2"), currentBin)
+	require.Equal(t, cfg.UpgradeBin("chain3"), currentBin)
 }
 
 // TestLaunchProcess will try running the script a few times and watch upgrades work properly

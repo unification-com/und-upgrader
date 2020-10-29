@@ -3,4 +3,6 @@
 echo Chain 2 is live!
 echo Args: $@
 sleep 1
-echo Finished successfully
+echo 'I[2020-10-29|12:58:40.526] Committed state module=state height=60 txs=9 appHash=6994FE87727435B239A33866D3EFCA759A5DE905EB1EDF1D257630D6C1868459'
+sleep 2
+echo Never should be printed!!!
