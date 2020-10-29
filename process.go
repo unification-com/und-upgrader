@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -34,18 +35,28 @@ func LaunchProcess(cfg *Config, args []string, stdout, stderr io.Writer) (bool, 
 	scanOut := bufio.NewScanner(io.TeeReader(outpipe, stdout))
 	scanErr := bufio.NewScanner(io.TeeReader(errpipe, stderr))
 
+	plans, planErr := LoadPlans(cfg)
+	if planErr != nil {
+		return false, errors.Wrapf(err, "loading plan")
+	}
+
 	err = cmd.Start()
 	if err != nil {
 		return false, errors.Wrapf(err, "launching process %s %s", bin, strings.Join(args, " "))
 	}
 
 	// three ways to exit - command ends, find regexp in scanOut, find regexp in scanErr
-	upgradeInfo, err := WaitForUpgradeOrExit(cmd, scanOut, scanErr)
+	upgradeInfo, err := WaitForUpgradeOrExit(cmd, scanOut, scanErr, plans)
 	if err != nil {
 		return false, err
 	}
 	if upgradeInfo != nil {
-		return true, DoUpgrade(cfg, upgradeInfo)
+		fmt.Fprintln(stdout, fmt.Sprintf("ATTEMPT UPGRADE to %s at height %d", upgradeInfo.Name, upgradeInfo.Height))
+		err := DoUpgrade(cfg, upgradeInfo)
+		if err == nil {
+			fmt.Fprintln(stdout, fmt.Sprintf("SUCCESSFUL UPGRADE to %s at height %d", upgradeInfo.Name, upgradeInfo.Height))
+		}
+		return true, err
 	}
 
 	return false, nil
@@ -97,11 +108,11 @@ func (u *WaitResult) SetUpgrade(up *UpgradeInfo) {
 // It returns (nil, err) if the process died by itself, or there was an issue reading the pipes
 // It returns (nil, nil) if the process exited normally without triggering an upgrade. This is very unlikely
 // to happend with "start" but may happend with short-lived commands like `gaiad export ...`
-func WaitForUpgradeOrExit(cmd *exec.Cmd, scanOut, scanErr *bufio.Scanner) (*UpgradeInfo, error) {
+func WaitForUpgradeOrExit(cmd *exec.Cmd, scanOut, scanErr *bufio.Scanner, plans UpgradePlans) (*UpgradeInfo, error) {
 	var res WaitResult
 
 	waitScan := func(scan *bufio.Scanner) {
-		upgrade, err := WaitForUpdate(scan)
+		upgrade, err := WaitForUpdate(scan, plans)
 		if err != nil {
 			res.SetError(err)
 		} else if upgrade != nil {

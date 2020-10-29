@@ -13,6 +13,7 @@ const (
 	genesisDir  = "genesis"
 	upgradesDir = "upgrades"
 	currentLink = "current"
+	planJson    = "plan.json"
 )
 
 // Config is the information passed in to control the daemon
@@ -26,6 +27,11 @@ type Config struct {
 // Root returns the root directory where all info lives
 func (cfg *Config) Root() string {
 	return filepath.Join(cfg.Home, rootName)
+}
+
+// UpgradePlan returns the upgrade plan JSON
+func (cfg *Config) Plan() string {
+	return filepath.Join(cfg.Home, rootName, planJson)
 }
 
 // GenesisBin is the path to the genesis binary - must be in place to start manager
@@ -125,6 +131,12 @@ func (cfg *Config) validate() error {
 	}
 	if !info.IsDir() {
 		return errors.Errorf("%s is not a directory", info.Name())
+	}
+
+	// ensure the plan.json exists
+	_, err = os.Stat(cfg.Plan())
+	if err != nil {
+		return errors.Wrap(err, "cannot stat plan.json")
 	}
 
 	return nil

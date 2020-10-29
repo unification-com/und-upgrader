@@ -1,0 +1,11 @@
+{"upgrades":[
+  {
+    "height": 24,
+    "version": "chain2"
+  },
+  {
+    "height": 60,
+    "version": "chain3"
+  }
+]
+}

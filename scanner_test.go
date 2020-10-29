@@ -11,50 +11,42 @@ import (
 func TestWaitForInfo(t *testing.T) {
 	cases := map[string]struct {
 		write         []string
+		plans         []byte
 		expectUpgrade *UpgradeInfo
 		expectErr     bool
 	}{
 		"no match": {
 			write: []string{"some", "random\ninfo\n"},
+			plans: []byte(`{"upgrades":[{"height":200,"version":"1.4.6"}]}`),
 		},
-		"match height with no info": {
-			write: []string{"first line\n", `UPGRADE "myname" NEEDED at height: 123: `, "\nnext line\n"},
+		"match height to first upgrade plan": {
+			write: []string{"first line\n", `Committed state      module=state height=200 txs=111 appHash=4694FE87727435B239A33866D3EFCA759A5DE905EB1EDF1D257630D6C1868459`, "\nnext line\n"},
+			plans: []byte(`{"upgrades":[{"height":200,"version":"1.4.6"}]}`),
 			expectUpgrade: &UpgradeInfo{
-				Name:   "myname",
-				Height: 123,
-				Info:   "",
-			},
-		},
-		"match height with info": {
-			write: []string{"first line\n", `UPGRADE "take2" NEEDED at height: 123:   DownloadData here!`, "\nnext line\n"},
-			expectUpgrade: &UpgradeInfo{
-				Name:   "take2",
-				Height: 123,
-				Info:   "DownloadData",
-			},
-		},
-		"match time with no info": {
-			write: []string{"first line\n", `UPGRADE "timer" NEEDED at time: 2020-04-01T11:22:33Z:   `, "\nnext line\n"},
-			expectUpgrade: &UpgradeInfo{
-				Name: "timer",
-				Time: "2020-04-01T11:22:33Z",
+				Name:   "1.4.6",
+				Height: 200,
+				Time: "",
 				Info: "",
 			},
 		},
-		"match time with info": {
-			write: []string{"first line\n", `UPGRADE "april" NEEDED at time: 2020-04-01T11:22:33Z: https://april.foo.rs/hahaha  `, "\nnext line\n"},
+		"match height to second upgrade plan": {
+			write: []string{"first line\n", `Committed state                              module=state height=300 txs=0 appHash=4694FE87727435B239A33866D3EFCA759A5DE905EB1EDF1D257630D6C1868459`, "\nnext line\n"},
+			plans: []byte(`{"upgrades":[{"height":200,"version":"1.4.6"},{"height":300,"version":"1.4.7"}]}`),
 			expectUpgrade: &UpgradeInfo{
-				Name: "april",
-				Time: "2020-04-01T11:22:33Z",
-				Info: "https://april.foo.rs/hahaha",
+				Name:   "1.4.7",
+				Height: 300,
+				Time: "",
+				Info: "",
 			},
 		},
 		"chunks": {
-			write: []string{"first l", "ine\nERROR 2020-02-03T11:22:33Z: UPGRADE ", `"split" NEEDED at height: `, "789:   {\"foo\":123} asgsdg", "  \n LOG: next line"},
+			write: []string{"first l", "ine\nERROR 2020-02-03T11:22:33Z: Committed state   ", `module=state `, "height=200 txs=999999 appHash=4694FE87727435B239A33866D3EFCA759A5DE905EB1EDF1D257630D6C1868459", "  \n LOG: next line"},
+			plans: []byte(`{"upgrades":[{"height":200,"version":"1.4.6"}]}`),
 			expectUpgrade: &UpgradeInfo{
-				Name:   "split",
-				Height: 789,
-				Info:   `{"foo":123}`,
+				Name:   "1.4.6",
+				Height: 200,
+				Time: "",
+				Info: "",
 			},
 		},
 	}
@@ -74,8 +66,10 @@ func TestWaitForInfo(t *testing.T) {
 				w.Close()
 			}()
 
+			upgradePlans, _ := LoadPlanFromJsonBytes(tc.plans)
+
 			// now scan the info
-			info, err := WaitForUpdate(scan)
+			info, err := WaitForUpdate(scan, upgradePlans)
 			if tc.expectErr {
 				assert.Error(t, err)
 				return

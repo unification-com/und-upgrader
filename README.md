@@ -1,26 +1,33 @@
-**`cosmosd` has been [incorporated into the Cosmos SDK](https://github.com/cosmos/cosmos-sdk/pull/6820) and renamed `cosmovisor`, see: https://github.com/cosmos/cosmos-sdk/tree/master/cosmovisor**
+# und Upgrade Manager
 
-# Cosmos Upgrade Manager
+The `und` upgrade manager is a modification of the original [cosmosd](https://github.com/regen-network/cosmosd) tool developed
+by Regen Network.
 
-[![CircleCI](https://circleci.com/gh/regen-network/cosmos-upgrade-manager/tree/master.svg?style=svg)](https://circleci.com/gh/regen-network/cosmos-upgrade-manager/tree/master) [![codecov](https://codecov.io/gh/regen-network/cosmos-upgrade-manager/branch/master/graph/badge.svg)](https://codecov.io/gh/regen-network/cosmos-upgrade-manager)
+This upgrade helper tool has been forked and modified to work with `und` binaries,
+which do not currently implement the `x.upgrade` module upon which the original
+`cosmosd` (now `cosmovisor`) are built to work with.
 
-This is a tiny little shim around Cosmos SDK binaries that use the upgrade
-module that allows for smooth and configurable management of upgrading
+(A planned future major upgrade of the `und` binaries will include integration
+of the Cosmos SDK `x.upgrade` module, along with the SDK v0.40.x upgrade. This tool
+is an interim solution until that upgrade occurs.)
+
+This is a tiny little shim around Cosmos SDK binaries and allows for smooth 
+and configurable management of upgrading
 binaries as a live chain is upgraded, and can be used to simplify validator
 devops while doing upgrades or to make syncing a full node for genesis
 simple. The upgrade manager will monitor the stdout of the daemon to look 
-for messages from the upgrade module indicating a pending or required upgrade 
-and act appropriately. (With better integrations possible in the future)
+for Committed state messages at certain heights indicating a pending or required upgrade 
+and act appropriately.
 
 ## Arguments
 
-`upgrader` is a shim around a native binary. All arguments passed to the upgrade manager 
+`und_upgrader` is a shim around a native `und` binary. All arguments passed to the upgrade manager 
 command will be passed to the current daemon binary (as a subprocess).
  It will return stdout and stderr of the subprocess as
 it's own. Because of that, it cannot accept any command line arguments, nor
 print anything to output (unless it dies before executing a binary).
 
-Configuration will be passed in the followingenvironmental variables:
+Configuration will be passed in the following environment variables:
 
 * `DAEMON_HOME` is the location where upgrade binaries should be kept (can
 be `$HOME/.gaiad` or `$HOME/.xrnd`)
@@ -45,18 +52,40 @@ constrolled by it. Under this folder, we will see the following:
     - bin
       - $DAEMON_NAME
 - current -> upgrades/foo, genesis, etc
+- plan.json
 ```
 
 Each version of the chain is stored under either `genesis` or `upgrades/<name>`, which holds `bin/$DAEMON_NAME`
 along with any other needed files (maybe the cli client? maybe some dlls?). `current` is a symlink to the currently
 active folder (so `current/bin/$DAEMON_NAME` is the binary)
 
-Note: the `<name>` after `upgrades` is the URI-encoded name of the upgrade as specified in the upgrade module plan.
+`plan.json` is a simple JSON file containing an array of upgrades for particular heights,
+for example:
+
+```json
+{
+  "upgrades":[
+    {
+      "height": 200,
+      "version": "1.4.8"
+    },
+    {
+      "height": 300,
+      "version": "1.4.9"
+    }
+  ]
+}
+```
+
+The above plan indicates that `und v1.4.8` should be installed at block height 200, 
+and `v1.4.9` at block height 300, and so on.
+
+Note: the `<name>` after `upgrades` is the '`version`' of the upgrade as specified in `plan.json`.
 
 Please note that `$DAEMON_HOME/upgrade_manager` just stores the *binaries* and associated *program code*.
 The `upgrader` binary can be stored in any typical location (eg `/usr/local/bin`). The actual blockchain
-program will store it's data under `$GAIA_HOME` etc, which is independent of the `$DAEMON_HOME`. You can
-choose to export `GAIA_HOME=$DAEMON_HOME` and then end up with a configuation like the following, but this
+program will store it's data under `$UND_HOME` etc, which is independent of the `$DAEMON_HOME`. You can
+choose to export `UND_HOME=$DAEMON_HOME` and then end up with a configuation like the following, but this
 is left as a choice to the admin for best directory layout.
 
 ```
@@ -70,8 +99,9 @@ is left as a choice to the admin for best directory layout.
 
 Basic Usage:
 
-* The admin is responsible for installing the `upgrade_manager` and setting it as a eg. systemd service to auto-restart, along with proper environmental variables
+* The admin is responsible for installing the `und_upgrader` and setting it as a eg. systemd service to auto-restart, along with proper environmental variables
 * The admin is responsible for installing the `genesis` folder manually
+* The admin is responsible for acquiring or defining the network agreed `plan.json`
 * The upgrade manager will set the `current` link to point to `genesis` at first start (when no `current` link exists)
 * The admin is (generally) responsible for installing the `upgrades/<name>` folders manually
 * The upgrade manager handles switching over the binaries at the correct points, so the admin can prepare days in advance and relax at upgrade time
@@ -83,67 +113,31 @@ for those who wish to sync a fullnode from start.
 The `DAEMON` specific code, like the tendermint config, the application db, syncing blocks, etc is done as normal.
 The same eg. `GAIA_HOME` directives and command-line flags work, just the binary name is different.
 
+Example:
+
+```bash
+export DAEMON_HOME=/path/to/.und_mainchain
+export DAEMON_NAME=und
+export DAEMON_RESTART_AFTER_UPGRADE=on
+und_upgrader --home=/path/to/.und_mainchain
+```
+
+This will start the `und_upgrader`, passing all arguments to the underlying `und`
+process, and automatically restarting the `und` binary after each upgrade.
+
 ## Upgradeable Binary Specification
 
-In the basic version, the upgrade_manager will read the stdout log messages
-to determine when an upgrade is needed. We are considering more complex solutions
-via signaling of some sort, but starting with the simple design:
+In the basic version, the `und_upgrader` will read the stdout log messages
+to determine when an upgrade is needed:
 
-* when an upgrade is needed the binary will print a line that matches this
-regular expression: `UPGRADE "(.*)" NEEDED at height (\d+):(.*)`.
-* the second match in the above regular expression can be a JSON object with
-a `binaries` key as described above
+* The `und_upgrader` scans stdout for `Committed state  module=state height= `
+messages, specifically for heights as defined in `plan.json`
+* If an upgrade is needed, the current `und` subprocess will be killed, 
+`current` will point to the new version directory, according to `plan.json`
+and the new `und` binary version will be launched.
 
-The name (first regexp) will be used to select the new binary to run. If it is present,
-the current subprocess will be killed, `current` will be upgraded to the new directory, 
-and the new binary will be launched.
+## Distribution
 
-**Question** should we just kill the upgrade manager after it does the updates?
-so it gets a clean restart and just runs the new binary (under `current`).
-it should be safe to restart (as a service).
-
-## Auto-Download
-
-Generally, the system requires that the administrator place all relevant binaries
-on the disk before the upgrade happens. However, for people who don't need such
-control and want an easier setup (maybe they are syncing a non-validating fullnode
-and want to  do little maintenance), there is another option.
-
-If you set `DAEMON_ALLOW_DOWNLOAD_BINARIES=on` then when an upgrade is triggered and no local binary
-can be found, the upgrade_manager will attempt to download and install the binary itself.
-The plan stored in the upgrade module has an info field for arbitrary json.
-This info is expected to be outputed on the halt log message. There are two
-valid format to specify a download in such a message:
-
-1. Store an os/architecture -> binary URI map in the upgrade plan info field
-as JSON under the `"binaries"` key, eg:
-```json
-{
-  "binaries": {
-    "linux/amd64":"https://example.com/gaia.zip?checksum=sha256:aec070645fe53ee3b3763059376134f058cc337247c978add178b6ccdfb0019f"
-  }
-}
-```
-2. Store a link to a file that contains all information in the above format (eg. if you want
-to specify lots of binaries, changelog info, etc without filling up the blockchain).
-
-e.g `https://example.com/testnet-1001-info.json?checksum=sha256:deaaa99fda9407c4dbe1d04bd49bab0cc3c1dd76fa392cd55a9425be074af01e`
-
-This file contained in link will be retrieved by [go-getter](https://github.com/hashicorp/go-getter) 
-and the "binaries" field will be parsed as above.
-
-If there is no local binary, `DAEMON_ALLOW_DOWNLOAD_BINARIES=on`, and we can access a canonical url for the new binary,
-then the upgrade_manager will download it with [go-getter](https://github.com/hashicorp/go-getter) and
-unpack it into the `upgrades/<name>` folder to be run as if we installed it manually
-
-Note that for this mechanism to provide strong security guarantees, all URLS should include a
-sha{256,512} checksum. This ensures that no false binary is run, even if someone hacks the server
-or hijacks the dns. go-getter will always ensure the downloaded file matches the checksum if it
-is provided. And also handles unpacking archives into directories (so these download links should be
-a zip of all data in the bin directory).
-
-To properly create a checksum on linux, you can use the `sha256sum` utility. eg. 
-`sha256sum ./testdata/repo/zip_directory/autod.zip`
-which should return `29139e1381b8177aec909fab9a75d11381cab5adf7d3af0c05ff1c9c117743a7`.
-You can also use `sha512sum` if you like longer hashes, or `md5sum` if you like to use broken hashes.
-Make sure to set the hash algorithm properly in the checksum argument to the url.
+A pre-defined package, containing all requried binaries, and `plan.json`
+ may be distributed via our `mainnet` repository, making it simple for new
+nodes to join the network and seamlessly sync from genesis.
